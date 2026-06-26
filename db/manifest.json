@@ -1,0 +1,21 @@
+{
+  "name": "EARLY BIRD BATTLE",
+  "short_name": "早起きバトル",
+  "description": "毎朝起きるのが楽しみになる、対戦型早起きアプリ。",
+  "start_url": "./alarm.php",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#ff416c",
+  "icons": [
+    {
+      "src": "./images/egg_avatar.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./images/dragon_avatar.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

@@ -10,12 +10,19 @@ header('Content-Type: text/plain; charset=utf-8');
 
 try {
 
+    if (!$pdo) {
+        throw new Exception('データベース接続に失敗しました');
+    }
+
     echo "1. DB接続OK\n";
 
     $pdo->exec("CREATE SCHEMA IF NOT EXISTS suggest_plan");
     echo "2. CREATE SCHEMA OK\n";
 
-    $pdo->exec("SET search_path TO suggest_plan");
+    $result = $pdo->exec("SET search_path TO suggest_plan");
+    if ($result === false) {
+        throw new Exception('スキーマ設定に失敗しました');
+    }
     echo "3. SET SEARCH_PATH OK\n";
 
     $pdo->beginTransaction();
@@ -26,8 +33,19 @@ try {
     $pdo->exec("DROP TABLE IF EXISTS alarms CASCADE");
     $pdo->exec("DROP TABLE IF EXISTS users CASCADE");
     $pdo->exec("DROP TABLE IF EXISTS titles CASCADE");
+    $pdo->exec("DROP TABLE IF EXISTS ranks CASCADE");
 
 
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS ranks (
+            rank_id SERIAL PRIMARY KEY,
+            rank_name VARCHAR(50) NOT NULL,
+            min_rating INT NOT NULL,
+            rank_icon VARCHAR(10) NOT NULL
+        );
+    ");
+    echo "4. ranks OK\n";
 
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS titles (
@@ -36,7 +54,7 @@ try {
             required_wins INT NOT NULL
         );
     ");
-    echo "4. titles OK\n";
+    echo "5. titles OK\n";
 
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS users (
@@ -46,13 +64,16 @@ try {
             display_name VARCHAR(50) NOT NULL,
             icon_image VARCHAR(255),
             win_count INT DEFAULT 0,
+            lose_count INT DEFAULT 0,
+            rating INT DEFAULT 1000,
+            is_cpu BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             title_id INT,
             FOREIGN KEY (title_id)
                 REFERENCES titles(title_id)
         );
     ");
-    echo "5. users OK\n";
+    echo "6. users OK\n";
 
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS alarms (
@@ -65,7 +86,7 @@ try {
                 ON DELETE CASCADE
         );
     ");
-    echo "6. alarms OK\n";
+    echo "7. alarms OK\n";
 
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS notifications (
@@ -79,7 +100,7 @@ try {
                 ON DELETE CASCADE
         );
     ");
-    echo "7. notifications OK\n";
+    echo "8. notifications OK\n";
 
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS matches (
@@ -88,6 +109,7 @@ try {
             player2_id INT NOT NULL,
             match_date DATE NOT NULL,
             status VARCHAR(20) DEFAULT 'waiting',
+            is_cpu_match BOOLEAN DEFAULT FALSE,
 
             FOREIGN KEY (player1_id)
                 REFERENCES users(user_id),
@@ -96,7 +118,7 @@ try {
                 REFERENCES users(user_id)
         );
     ");
-    echo "8. matches OK\n";
+    echo "9. matches OK\n";
 
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS battles (
@@ -105,6 +127,7 @@ try {
             winner_id INT,
             player1_tap TIMESTAMP,
             player2_tap TIMESTAMP,
+            cpu_wake_time TIMESTAMP,
             battle_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
             FOREIGN KEY (match_id)
@@ -115,18 +138,61 @@ try {
                 REFERENCES users(user_id)
         );
     ");
-    echo "9. battles OK\n";
+    echo "10. battles OK\n";
 
     $pdo->commit();
 
-    echo "\nDB・テーブル作成完了";
+    // 称号データを挿入
+    $pdo->exec("SET search_path TO suggest_plan");
+    $titles = [
+        [1, '新人', 0],
+        [2, '朝型戦士', 5],
+        [3, '朝型マスター', 10],
+        [4, '朝型王', 20],
+        [5, '朝型伝説', 50]
+    ];
+    
+    foreach ($titles as $title) {
+        $stmt = $pdo->prepare("INSERT INTO titles (title_id, title_name, required_wins) VALUES (?, ?, ?)");
+        if (!$stmt->execute($title)) {
+            $error_info = $stmt->errorInfo();
+            if (strpos($error_info[2], 'duplicate') === false && strpos($error_info[2], 'unique') === false) {
+                throw new Exception('称号データの挿入に失敗しました: ' . implode(', ', $error_info));
+            }
+        }
+    }
+
+    // ランクデータを挿入
+    $ranks = [
+        [1, 'ブロンズ', 0, '🥉'],
+        [2, 'シルバー', 1000, '🥈'],
+        [3, 'ゴールド', 1200, '🥇'],
+        [4, 'プラチナ', 1400, '💎'],
+        [5, 'ダイヤモンド', 1600, '💠'],
+        [6, 'マスター', 1800, '👑'],
+        [7, 'レジェンド', 2000, '🔥']
+    ];
+    foreach ($ranks as $rank) {
+        $stmt = $pdo->prepare("INSERT INTO ranks (rank_id, rank_name, min_rating, rank_icon) VALUES (?, ?, ?, ?)");
+        $stmt->execute($rank);
+    }
+
+    // CPUユーザーを作成
+    $cpu_password = password_hash('cpu_internal_account', PASSWORD_BCRYPT);
+    $pdo->prepare("INSERT INTO users (username, password, display_name, is_cpu, title_id, rating) VALUES (?, ?, ?, true, 1, 1000)")
+        ->execute(['__cpu_player__', $cpu_password, '寝坊助CPU']);
+
+    echo "\nDB・テーブル作成完了（ランク・CPU含む）\n";
 
 } catch (Throwable $e) {
 
-    if ($pdo->inTransaction()) {
+    if ($pdo && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
 
     echo "\nエラー発生\n";
-    echo $e->getMessage();
+    echo $e->getMessage() . "\n";
+    if (method_exists($e, 'getCode')) {
+        echo "エラーコード: " . $e->getCode() . "\n";
+    }
 }
